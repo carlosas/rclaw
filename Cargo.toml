@@ -1,0 +1,26 @@
+[package]
+name = "rclaw"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.36", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.31", features = ["bundled"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+clap = { version = "4.5", features = ["derive"] }
+uuid = { version = "1.7", features = ["v4", "fast-rng"] }
+thiserror = "1.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+ratatui = "0.30.0"
+crossterm = "0.29.0"
+regex = "1.12.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+oauth2 = { version = "5.0.0", features = ["reqwest"] }
+url = "2.5.8"
+cron = "0.12"
