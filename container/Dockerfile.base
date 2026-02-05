@@ -1,0 +1,20 @@
+FROM node:20-slim
+
+# Install core system dependencies (The "Survival Kit")
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    ca-certificates \
+    tree \
+    build-essential \
+    vim-tiny \
+    jq \
+    htop \
+    unzip \
+    wget \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user for execution
+RUN useradd -m -s /bin/bash rclaw
+WORKDIR /home/rclaw/workspace

@@ -81,6 +81,18 @@ async fn main() {
                 db.set_auth_key("gemini_access_token", &access).unwrap();
                 db.set_auth_key("gemini_refresh_token", &refresh).unwrap();
                 info!("Credentials saved to database.");
+                
+                info!("Building agent containers...");
+                let status = std::process::Command::new("bash")
+                    .arg("container/build.sh")
+                    .status()
+                    .expect("Failed to execute build script");
+
+                if status.success() {
+                    info!("Containers built successfully.");
+                } else {
+                    error!("Container build failed with exit code: {}", status);
+                }
             }
         }
         Some(Commands::Start) => {

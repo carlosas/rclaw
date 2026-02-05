@@ -9,7 +9,7 @@ target/
 *.pdb
 
 # Rclaw specific
-workspace_data/
+workspace/
 *.db
 *.db-shm
 *.db-wal

@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::Instant;
-use tracing::{error, info};
+use tracing::{error, info, debug};
+use std::fs;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ContainerInput {
@@ -29,24 +30,63 @@ pub struct RegisteredGroup {
 }
 
 pub fn run_container_agent(
-    _group: &RegisteredGroup,
+    group: &RegisteredGroup,
     input: &ContainerInput,
 ) -> Result<ContainerOutput> {
     let start_time = Instant::now();
+    let project_root = std::env::current_dir().context("Failed to get current dir")?;
+    let home_dir = dirs::home_dir().context("Failed to get home dir")?;
 
-    info!("Running gemini-cli locally for prompt: {}", input.prompt);
+    info!("Running rclaw-agent container for prompt: {}", input.prompt);
 
-    let mut child = Command::new("gemini")
-        .arg("-o")
-        .arg("stream-json")
-        .arg("--approval-mode")
-        .arg("yolo")
-        .arg(&input.prompt)
+    // Prepare mounts
+    let group_dir = project_root.join("workspace");
+    if !group_dir.exists() {
+        fs::create_dir_all(&group_dir)?;
+    }
+
+    // Prepare OAuth config mounts (Detect multiple locations)
+    let gemini_config_v1 = home_dir.join(".gemini");
+    let gemini_config_v2 = home_dir.join(".config").join("gemini");
+    
+    let mut args = vec![
+        "run".to_string(),
+        "-i".to_string(),
+        "--rm".to_string(),
+        "-v".to_string(), format!("{}:/home/rclaw/workspace", group_dir.display()),
+        "-w".to_string(), "/home/rclaw/workspace".to_string(),
+        // Inyectar el ID del usuario actual para asegurar permisos y el HOME correcto
+        "-u".to_string(), format!("{}:{}", unsafe { libc::getuid() }, unsafe { libc::getgid() }),
+        "-e".to_string(), "HOME=/home/rclaw".to_string(),
+    ];
+
+    if gemini_config_v1.exists() {
+        args.push("-v".to_string());
+        args.push(format!("{}:/home/rclaw/.gemini", gemini_config_v1.display()));
+    }
+    
+    if gemini_config_v2.exists() {
+        args.push("-v".to_string());
+        args.push(format!("{}:/home/rclaw/.config/gemini", gemini_config_v2.display()));
+    }
+
+    args.push("rclaw-agent:latest".to_string());
+
+    debug!("Docker args: {:?}", args);
+
+    let mut child = Command::new("docker")
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("Failed to spawn gemini-cli. Is it installed in the PATH?")?;
+        .context("Failed to spawn docker. Is it installed and is the image built?")?;
+
+    // Send input via stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        let input_json = serde_json::to_string(input)?;
+        stdin.write_all(input_json.as_bytes())?;
+    }
 
     let mut stdout = String::new();
     if let Some(mut stdout_stream) = child.stdout.take() {
@@ -61,9 +101,9 @@ pub fn run_container_agent(
     let status = child.wait()?;
 
     let duration = start_time.elapsed();
-    info!("gemini-cli finished in {:?}", duration);
+    info!("Container finished in {:?}", duration);
 
-    // Filtrar advertencias de depreciación de Node (punycode bug) y logs de YOLO
+    // Filtrar ruidos
     let filtered_stderr = stderr
         .lines()
         .filter(|line| {
@@ -71,13 +111,12 @@ pub fn run_container_agent(
                 && !line.contains("punycode")
                 && !line.contains("YOLO mode")
                 && !line.contains("Loaded cached credentials")
-                && !line.contains("Hook registry")
         })
         .collect::<Vec<_>>()
         .join("\n");
 
     if !status.success() && !filtered_stderr.trim().is_empty() {
-        error!("gemini-cli failed: {}", filtered_stderr);
+        error!("Container failed: {}", filtered_stderr);
         return Ok(ContainerOutput {
             status: "error".to_string(),
             result: None,
@@ -86,7 +125,7 @@ pub fn run_container_agent(
         });
     }
 
-    // Procesar el stream-json preservando el orden cronológico
+    // Procesar el stream-json
     let mut combined_output: Vec<String> = Vec::new();
 
     for line in stdout.lines() {
@@ -95,7 +134,6 @@ pub fn run_container_agent(
                 Some("message") => {
                     if let Some(content) = val["content"].as_str() {
                         if val["role"].as_str() == Some("assistant") {
-                            // Intentar combinar con el último mensaje si es del mismo tipo para evitar saltos excesivos
                             if let Some(last) = combined_output.last_mut() {
                                 if !last.starts_with("🔨")
                                     && !last.starts_with("✅")
