@@ -2,7 +2,7 @@
 
 > 🚧 WORK IN PROGRESS 🚧
 
-**Rclaw** is a lightweight Rust imitator of [OpenClaw](https://github.com/openclaw/openclaw), designed to provide a local AI assistant interface with tool-calling capabilities and scheduled tasks. Rclaw aims to be a more secure AI assistant running in isolated containers.
+**Rclaw** is a lightweight and secure AI Assistant inspired in [OpenClaw](https://github.com/openclaw/openclaw), designed to provide a local assistant with tool-calling capabilities and scheduled tasks. Rclaw aims to be a secure orchestrator of AI instances running in isolated containers.
 
 ![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -72,9 +72,3 @@ _(Note: Docker must be running for the agent execution to work)._
 ## 🤝 Contributing
 
 This is a personal project, but suggestions are welcome!
-
-1.  Fork it!
-2.  Create your feature branch: `git checkout -b my-new-feature`
-3.  Commit your changes: `git commit -am 'Add some feature'`
-4.  Push to the branch: `git push origin my-new-feature`
-5.  Submit a pull request :)
