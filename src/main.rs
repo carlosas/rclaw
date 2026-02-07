@@ -75,12 +75,78 @@ async fn main() {
 
     match &cli.command {
         Some(Commands::Setup) => {
-            if let Some((access, refresh)) = setup_gemini_auth().await {
-                // Guardar en DB
-                let db = Db::new(&db_path).expect("Failed to open DB");
-                db.set_auth_key("gemini_access_token", &access).unwrap();
-                db.set_auth_key("gemini_refresh_token", &refresh).unwrap();
-                info!("Credentials saved to database.");
+            info!("Starting setup wizard...");
+            let db = Db::new(&db_path).expect("Failed to open DB");
+            
+            let has_auth = db.get_auth_key("gemini_access_token").unwrap_or(None).is_some();
+            let has_image = std::process::Command::new("docker")
+                .args(&["inspect", "--type=image", "rclaw-agent:latest"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            let mut run_auth = true;
+            let mut run_build = true;
+
+            if has_auth || has_image {
+                println!("\n--- RClaw Setup Status ---");
+                println!("Gemini Auth: {}", if has_auth { "CONFIGURED ✅" } else { "NOT FOUND ❌" });
+                println!("Docker Image: {}", if has_image { "BUILT ✅" } else { "NOT FOUND ❌" });
+                println!("--------------------------\n");
+
+                if has_auth {
+                    println!("What would you like to do?");
+                    println!("1) Re-configure everything (New Auth + Rebuild Images)");
+                    println!("2) Only rebuild Docker images (Keep current Auth)");
+                    println!("3) Cancel");
+                    
+                    print!("\nSelect an option [1-3]: ");
+                    use std::io::{self, Write};
+                    io::stdout().flush().unwrap();
+
+                    let mut choice = String::new();
+                    io::stdin().read_line(&mut choice).unwrap();
+                    match choice.trim() {
+                        "1" => {
+                            run_auth = true;
+                            run_build = true;
+                        }
+                        "2" => {
+                            run_auth = false;
+                            run_build = true;
+                        }
+                        _ => {
+                            println!("Setup cancelled.");
+                            return;
+                        }
+                    }
+                }
+            }
+
+            let mut auth_success = !run_auth;
+            if run_auth {
+                if let Some((access, refresh)) = setup_gemini_auth().await {
+                    db.set_auth_key("gemini_access_token", &access).unwrap();
+                    db.set_auth_key("gemini_refresh_token", &refresh).unwrap();
+                    info!("Credentials saved to database.");
+                    auth_success = true;
+                } else {
+                    error!("Gemini Auth failed.");
+                }
+            }
+
+            if auth_success && run_build {
+                info!("Stopping and removing existing rclaw-agent-singleton container...");
+                let _ = std::process::Command::new("docker")
+                    .args(&["stop", "rclaw-agent-singleton"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                let _ = std::process::Command::new("docker")
+                    .args(&["rm", "rclaw-agent-singleton"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
 
                 info!("Building agent containers...");
                 let status = std::process::Command::new("bash")
@@ -118,8 +184,24 @@ async fn main() {
             }
         }
         Some(Commands::Start) => {
-            info!("Initializing Rclaw...");
+            // 0. Pre-flight check: Ensure docker image exists
+            let check_image = std::process::Command::new("docker")
+                .args(&["inspect", "--type=image", "rclaw-agent:latest"])
+                .output();
 
+            match check_image {
+                Ok(output) if output.status.success() => {
+                    // Solo procedemos si la imagen existe
+                }
+                _ => {
+                    // Imprimir directamente a stderr para asegurar visibilidad antes de que el logger se apropie de todo
+                    eprintln!("\n❌ ERROR CRÍTICO: No se ha encontrado la imagen de Docker 'rclaw-agent:latest'.");
+                    eprintln!("👉 Por favor, ejecuta 'cargo run -- setup' primero para construir las imágenes necesarias.\n");
+                    return;
+                }
+            }
+
+            info!("Initializing Rclaw...");
             // Inicializar DB
             let db: Db = match Db::new(&db_path) {
                 Ok(db) => db,
@@ -158,7 +240,7 @@ async fn main() {
 
                             let input = ContainerInput {
                                 prompt,
-                                session_id: None,
+                                session_id: "interactive".to_string(),
                                 group_folder: "main".to_string(),
                                 chat_jid: "tui-user".to_string(),
                                 is_main: true,
@@ -212,7 +294,7 @@ async fn main() {
 
             let input = ContainerInput {
                 prompt: prompt.clone(),
-                session_id: None,
+                session_id: "cli-run".to_string(),
                 group_folder: group.clone(),
                 chat_jid: "test-user@s.whatsapp.net".to_string(),
                 is_main: group == "main",

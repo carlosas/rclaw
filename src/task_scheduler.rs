@@ -148,7 +148,7 @@ impl TaskScheduler {
 
                     let input = ContainerInput {
                         prompt: task.prompt.clone(),
-                        session_id: None,
+                        session_id: "scheduled-task".to_string(),
                         group_folder: task.group_folder.clone(),
                         chat_jid: format!("scheduled-task-{}", task.id),
                         is_main: false,
