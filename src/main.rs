@@ -81,7 +81,7 @@ async fn main() {
                 db.set_auth_key("gemini_access_token", &access).unwrap();
                 db.set_auth_key("gemini_refresh_token", &refresh).unwrap();
                 info!("Credentials saved to database.");
-                
+
                 info!("Building agent containers...");
                 let status = std::process::Command::new("bash")
                     .arg("container/build.sh")
@@ -90,6 +90,28 @@ async fn main() {
 
                 if status.success() {
                     info!("Containers built successfully.");
+
+                    // Sync initial memory to workspace preserving existing files
+                    let memory_src_path = std::path::Path::new("container/setup/memory");
+
+                    if memory_src_path.exists() {
+                        std::fs::create_dir_all("workspace/memory").ok();
+
+                        // Use rsync recursively (-a) and do not overwrite existing files (--ignore-existing)
+                        let status = std::process::Command::new("rsync")
+                            .args([
+                                "-a",
+                                "--ignore-existing",
+                                "container/setup/memory/",
+                                "workspace/memory/",
+                            ])
+                            .status();
+
+                        match status {
+                            Ok(s) if s.success() => info!("Initial memory synced to workspace."),
+                            _ => error!("Failed to sync initial memory to workspace."),
+                        }
+                    }
                 } else {
                     error!("Container build failed with exit code: {}", status);
                 }

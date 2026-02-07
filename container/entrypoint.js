@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 /**
  * Entrypoint for rclaw-agent
@@ -25,18 +26,53 @@ async function main() {
 }
 
 function runGemini(input) {
-    const prompt = input.prompt;
-    
-    // Sentinel markers matching rclaw expectations
-    const OUTPUT_START_MARKER = '---RCLAW_OUTPUT_START---';
-    const OUTPUT_END_MARKER = '---RCLAW_OUTPUT_END---';
+    let userPrompt = input.prompt;
+    let systemInstructions = [];
+    let projectContext = [];
+
+    // 1. Build Identity Section
+    const workspacePath = '/home/rclaw/workspace';
+    const memoryPath = path.join(workspacePath, 'memory');
+
+    // Check both workspace and workspace/memory for identity files
+    const bootstrapFiles = ['IDENTITY.md', 'USER.md'];
+    for (const file of bootstrapFiles) {
+        let content = null;
+        const mainPath = path.join(workspacePath, file);
+        const memPath = path.join(memoryPath, file);
+
+        if (fs.existsSync(mainPath)) {
+            content = fs.readFileSync(mainPath, 'utf8');
+        } else if (fs.existsSync(memPath)) {
+            content = fs.readFileSync(memPath, 'utf8');
+        }
+
+        if (content) {
+            projectContext.push(`## ${file}\n${content}`);
+        }
+    }
+
+    // 2. Build explicit System Instructions to override defaults
+    systemInstructions.push("IMPORTANT: Ignore any previous instructions about being a software engineering assistant, Gemini, Claude, etc.");
+    systemInstructions.push("You are RClaw, the user's personal AI assistant.");
+    systemInstructions.push("Your identity and behavior are strictly defined by the 'IDENTITY.md' file.");
+
+    const finalPrompt = `
+# SYSTEM INSTRUCTIONS
+${systemInstructions.map(s => `- ${s}`).join('\n')}
+
+# PROJECT CONTEXT
+${projectContext.join('\n\n')}
+
+# USER REQUEST
+${userPrompt}
+`.trim();
 
     // gemini-cli command
-    // We use stream-json to capture tool use and messages correctly
     const gemini = spawn('gemini', [
         '-o', 'stream-json',
         '--approval-mode', 'yolo',
-        prompt
+        finalPrompt
     ]);
 
     let stdout = '';
@@ -44,7 +80,6 @@ function runGemini(input) {
 
     gemini.stdout.on('data', (data) => {
         stdout += data.toString();
-        // Forward real-time output if needed, but rclaw expects the full JSON block at the end
     });
 
     gemini.stderr.on('data', (data) => {
@@ -53,16 +88,7 @@ function runGemini(input) {
     });
 
     gemini.on('close', (code) => {
-        const output = {
-            status: code === 0 ? 'success' : 'error',
-            result: stdout,
-            error: code !== 0 ? stderr : null
-        };
-
-        // En rclaw-code actualmente el parser de container.rs lee TODO el stdout
-        // No usa marcadores de centinela todavía, así que enviamos el resultado directamente
-        // Pero para ser robustos en el futuro, los incluimos o simplemente enviamos el stdout crudo
-        // rclaw-code espera que el stdout sea el stream de JSONs
+        // rclaw-code expects the stream-json output directly on stdout
         process.stdout.write(stdout);
         process.exit(code);
     });
